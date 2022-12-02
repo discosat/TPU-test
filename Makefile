@@ -96,17 +96,9 @@ tools:
 	      $(TOOLS_OUT_DIR)/partitioner
 
 examples:
-	bazel build $(BAZEL_BUILD_FLAGS) //coral/examples:two_models_one_tpu \
-	                                 //coral/examples:two_models_two_tpus_threaded \
-	                                 //coral/examples:model_pipelining \
-	                                 //coral/examples:classify_image \
-	                                 //coral/examples:backprop_last_layer
+	bazel build $(BAZEL_BUILD_FLAGS) //coral/examples:classify_image 
 	mkdir -p $(EXAMPLES_OUT_DIR)
-	cp -f $(BAZEL_OUT_DIR)/coral/examples/two_models_one_tpu \
-	      $(BAZEL_OUT_DIR)/coral/examples/two_models_two_tpus_threaded \
-	      $(BAZEL_OUT_DIR)/coral/examples/model_pipelining \
-	      $(BAZEL_OUT_DIR)/coral/examples/classify_image \
-	      $(BAZEL_OUT_DIR)/coral/examples/backprop_last_layer \
+	cp -f $(BAZEL_OUT_DIR)/coral/examples/classify_image \
 	      $(EXAMPLES_OUT_DIR)
 
 clean:

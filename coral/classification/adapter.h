@@ -74,6 +74,11 @@ std::vector<Class> GetClassificationResults(
     float threshold = -std::numeric_limits<float>::infinity(),
     size_t top_k = std::numeric_limits<size_t>::max());
 
+std::vector<float> GetClassificationScores(
+        const tflite::Interpreter& interpreter
+        );
+
+
 // Gets only the top result from a classification model.
 //
 // @param interpreter The already-invoked interpreter for your classification

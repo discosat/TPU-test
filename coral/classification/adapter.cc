@@ -70,4 +70,16 @@ std::vector<Class> GetClassificationResults(
   }
 }
 
+std::vector<float> GetClassificationScores(
+        const tflite::Interpreter& interpreter
+        ) {
+    
+  const auto& tensor = *interpreter.output_tensor(0);
+  //if (tensor.type == kTfLiteUInt8 || tensor.type == kTfLiteInt8) {
+    return DequantizeTensor<float>(tensor);
+  //} else {
+  //  return TensorData<float>(tensor);
+  //}
+
+}
 }  // namespace coral

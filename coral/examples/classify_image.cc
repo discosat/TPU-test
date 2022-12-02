@@ -20,29 +20,59 @@ limitations under the License.
 //   convert cat.bmp -resize 224x224! cat.rgb
 #include <cmath>
 #include <iostream>
+#include <fstream>
 #include <string>
+#include <chrono>
+#include <ctime>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "coral/classification/adapter.h"
 #include "coral/examples/file_utils.h"
 #include "coral/tflite_utils.h"
-#include "glog/logging.h"
 #include "tensorflow/lite/interpreter.h"
 
-ABSL_FLAG(std::string, model_path, "mobilenet_v1_1.0_224_quant_edgetpu.tflite",
+ABSL_FLAG(std::string, model_path, "models/050_model.tflite",
           "Path to the tflite model.");
-ABSL_FLAG(std::string, image_path, "cat.rgb",
+ABSL_FLAG(std::string, image_path, "test_data/sunflower_224.rgb",
           "Path to the image to be classified. The input image size must match "
           "the input size of the model and the image must be stored as RGB "
           "pixel array.");
-ABSL_FLAG(std::string, labels_path, "imagenet_labels.txt",
+ABSL_FLAG(std::string, truth_path, "test_data/sunflower_224_truth.txt",
           "Path to the imagenet labels.");
-ABSL_FLAG(float, input_mean, 128, "Mean value for input normalization.");
-ABSL_FLAG(float, input_std, 128, "STD value for input normalization.");
+ABSL_FLAG(std::string, log_path, "out/test.log",
+          "Path to the log file");
+
+std::vector<float> read_ground_truth( const std::string& file_path) {
+    std::ifstream file(file_path.c_str());
+  CHECK(file) << "Cannot open " << file_path;
+  std::vector<float> data;
+
+    float element;
+    while (file >> element)
+    {
+        data.push_back(element);
+    }
+    return data;
+}
+
+int log(const std::string& file_path, const std::string& status, const std::string& cause) {
+    std::ofstream file(file_path.c_str(), std::ios_base::app);
+    if (file.is_open())
+  {
+    auto timenow = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    char* ctime_no_newline = std::strtok(std::ctime(&timenow), "\n");
+    file << ctime_no_newline << "\t" << status << "\t" << cause << "\n";
+    file.close();
+  }
+  else std::cout << "Unable to open file";
+  return 0;
+}
 
 int main(int argc, char* argv[]) {
   absl::ParseCommandLine(argc, argv);
+
+log(absl::GetFlag(FLAGS_log_path), std::string("OK"), std::string("Starting test")); 
 
   // Load the model.
   const auto model = coral::LoadModelOrDie(absl::GetFlag(FLAGS_model_path));
@@ -53,59 +83,28 @@ int main(int argc, char* argv[]) {
       coral::MakeEdgeTpuInterpreterOrDie(*model, edgetpu_context.get());
   CHECK_EQ(interpreter->AllocateTensors(), kTfLiteOk);
 
-  // Check whether input data need to be preprocessed.
-  // Image data must go through two transforms before running inference:
-  // 1. normalization, f = (v - mean) / std
-  // 2. quantization, q = f / scale + zero_point
-  // Preprocessing combines the two steps:
-  // q = (f - mean) / (std * scale) + zero_point
-  // When std * scale equals 1, and mean - zero_point equals 0, the image data
-  // do not need any preprocessing. In practice, it is probably okay to skip
-  // preprocessing for better efficiency when the normalization and quantization
-  // parameters approximate, but do not exactly meet the above conditions.
   CHECK_EQ(interpreter->inputs().size(), 1);
   const auto* input_tensor = interpreter->input_tensor(0);
   CHECK_EQ(input_tensor->type, kTfLiteUInt8)
       << "Only support uint8 input type.";
-  const float scale = input_tensor->params.scale;
-  const float zero_point = input_tensor->params.zero_point;
-  const float mean = absl::GetFlag(FLAGS_input_mean);
-  const float std = absl::GetFlag(FLAGS_input_std);
   auto input = coral::MutableTensorData<uint8_t>(*input_tensor);
-  if (std::abs(scale * std - 1) < 1e-5 && std::abs(mean - zero_point) < 1e-5) {
-    // Read the image directly into input tensor as there is no preprocessing
-    // needed.
-    std::cout << "Input data does not require preprocessing." << std::endl;
-    coral::ReadFileToOrDie(absl::GetFlag(FLAGS_image_path),
+  
+  coral::ReadFileToOrDie(absl::GetFlag(FLAGS_image_path),
                            reinterpret_cast<char*>(input.data()), input.size());
-  } else {
-    std::cout << "Input data requires preprocessing." << std::endl;
-    std::vector<uint8_t> image_data(input.size());
-    coral::ReadFileToOrDie(absl::GetFlag(FLAGS_image_path),
-                           reinterpret_cast<char*>(image_data.data()),
-                           input.size());
-    for (int i = 0; i < input.size(); ++i) {
-      const float tmp = (image_data[i] - mean) / (std * scale) + zero_point;
-      if (tmp > 255) {
-        input[i] = 255;
-      } else if (tmp < 0) {
-        input[i] = 0;
-      } else {
-        input[i] = static_cast<uint8_t>(tmp);
-      }
-    }
-  }
 
   CHECK_EQ(interpreter->Invoke(), kTfLiteOk);
 
-  // Read the label file.
-  auto labels = coral::ReadLabelFile(absl::GetFlag(FLAGS_labels_path));
+    std::vector<float> scores = coral::GetClassificationScores(*interpreter);
+    std::vector<float> scores_true = read_ground_truth(absl::GetFlag(FLAGS_truth_path));
 
-  for (auto result :
-       coral::GetClassificationResults(*interpreter, 0.0f, /*top_k=*/3)) {
-    std::cout << "---------------------------" << std::endl;
-    std::cout << labels[result.id] << std::endl;
-    std::cout << "Score: " << result.score << std::endl;
-  }
+    for (int i = 0; i < scores.size(); i++) {
+        if (std::abs(scores[i] - scores_true[i]) > 0.001 ) {
+           log(absl::GetFlag(FLAGS_log_path), std::string("FAIL"), std::to_string(scores[i]) + " != " + std::to_string(scores_true[i]) + " at index " + std::to_string(i));
+           return 1;
+        }
+    }
+
+    log(absl::GetFlag(FLAGS_log_path), std::string("OK"), std::string("Test passed."));
+
   return 0;
 }
