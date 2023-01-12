@@ -95,6 +95,9 @@ log(absl::GetFlag(FLAGS_log_path), std::string("OK"), std::string("Starting test
   CHECK_EQ(interpreter->Invoke(), kTfLiteOk);
 
     std::vector<float> scores = coral::GetClassificationScores(*interpreter);
+    for (int i=0; i < scores.size(); i++) {
+        std::cout << scores[i] << std::endl;
+    }
     std::vector<float> scores_true = read_ground_truth(absl::GetFlag(FLAGS_truth_path));
 
     for (int i = 0; i < scores.size(); i++) {
